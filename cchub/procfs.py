@@ -1,4 +1,4 @@
-"""讀 /proc：自己在不在 cchub 單元裡、掃同 cwd 的 rc 程序、執行檔是否已被刪（F14）。
+"""讀 /proc：自己在不在 cchub 單元裡、掃同 cwd 的 rc 程序、執行檔是否已被刪（CLI 更新會刪掉舊版執行檔）。
 
 根目錄可注入（測試用假的 /proc 樹）。
 """
@@ -59,7 +59,7 @@ class ProcFS:
             return ""
 
     def current_unit(self) -> str | None:
-        """自己所在的 cchub 單元名稱；不在單元裡回傳 None（§5.1 規則 9）。"""
+        """自己所在的 cchub 單元名稱；不在單元裡回傳 None（用來判斷是不是要對自己所在的單元動手）。"""
         m = UNIT_IN_CGROUP_RE.search(self.read_cgroup("self"))
         return m.group(1) if m else None
 

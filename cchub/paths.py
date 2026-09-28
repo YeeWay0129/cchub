@@ -1,9 +1,10 @@
-"""設定、狀態、實例檔路徑（SPEC §5.6）。
+"""設定、狀態、實例檔路徑。
 
 所有路徑都從「家目錄」推導。家目錄一律取自系統的使用者資料庫（pwd），
-**不讀任何環境變數**（沒有 CCHUB_HOME，也不看 HOME；D9）：
+**不讀任何環境變數**（沒有 CCHUB_HOME，也不看 HOME）：
 這樣鎖、~/.claude.json、systemd 單元永遠是同一組，不會出現「路徑是假的、systemctl 是真的」。
-`env -i` 的最小環境也一樣能用（AC8）。測試改用參數注入：Paths(home=暫存資料夾)。
+`env -i` 的最小環境也一樣能用（開機時 systemd 給單元的環境很精簡，不能依賴環境變數）。
+測試改用參數注入：Paths(home=暫存資料夾)。
 """
 
 from __future__ import annotations
@@ -15,7 +16,7 @@ from dataclasses import dataclass, field
 
 from .util import CchubError, read_json, is_within
 
-# SPEC §5.1 規則 6
+# 可接受的權限模式。bypassPermissions 會關掉所有權限確認，手機上就沒有任何把關，所以寫死拒絕
 ALLOWED_MODES = ("default", "acceptEdits", "auto", "plan", "dontAsk")
 FORBIDDEN_MODES = ("bypassPermissions",)
 
@@ -25,7 +26,7 @@ RECONCILE_TIMER = "cchub-reconcile.timer"
 
 
 def home_dir() -> str:
-    """家目錄＝使用者資料庫裡的值；刻意不看環境變數（D9）。"""
+    """家目錄＝使用者資料庫裡的值；刻意不看環境變數（原因見模組說明）。"""
     return pwd.getpwuid(os.getuid()).pw_dir
 
 
@@ -90,7 +91,7 @@ class Paths:
     def systemd_user_dir(self) -> str:
         return self._h(".config", "systemd", "user")
 
-    # --- Claude Code 的檔案（只讀，唯一例外是 §5.2 的信任寫入）---
+    # --- Claude Code 的檔案（只讀，唯一例外是 cchub new 替剛建立的資料夾寫信任，見 trust.py）---
     @property
     def claude_json(self) -> str:
         return self._h(".claude.json")
@@ -124,7 +125,7 @@ class Paths:
         return self._h(".local", "share", "claude", "versions")
 
     def unit_path_env(self) -> str:
-        """單元的 PATH（F15：開機時 user manager 的 PATH 不含 ~/.local/bin）。"""
+        """單元的 PATH（開機時 user manager 的 PATH 不含 ~/.local/bin，所以寫進單元）。"""
         return f"{self._h('.local', 'bin')}:/usr/local/bin:/usr/bin:/bin"
 
     def instance_cfg_file(self, instance: str) -> str:
@@ -142,7 +143,7 @@ DEFAULT_CONFIG = {
     "entry_mode": "auto",
     "default_capacity": 3,
     "max_servers": 6,
-    # 以下兩項為網路探測目標（§5.3 第 2 步），可改以便測試
+    # 以下兩項為 _serve 啟動 claude 前的網路探測目標，可改以便測試
     "probe_host": "api.anthropic.com",
     "probe_port": 443,
 }
@@ -176,7 +177,7 @@ class Config:
 
 
 def validate_mode(mode: str) -> str:
-    """SPEC §5.1 規則 6：bypassPermissions 寫死拒絕。"""
+    """bypassPermissions 寫死拒絕（會關掉所有權限確認）；不在清單上的模式也拒絕。"""
     if mode in FORBIDDEN_MODES:
         raise CchubError(f"權限模式 {mode} 一律拒絕（cchub 不允許 bypass）。可用：{', '.join(ALLOWED_MODES)}")
     if mode not in ALLOWED_MODES:

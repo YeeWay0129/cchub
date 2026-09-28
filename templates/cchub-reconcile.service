@@ -1,4 +1,4 @@
-# cchub reconcile（SPEC §5.3）：換掉被更新刪掉的執行檔、確保入口在跑。不自動停閒置伺服器。
+# cchub reconcile：換掉被更新刪掉的執行檔、確保入口在跑。不自動停閒置伺服器。
 [Unit]
 Description=cchub reconcile
 

@@ -1,4 +1,4 @@
-"""F6 信任判定、§5.1 規則 5 open 政策（AC12）、§5.2 信任寫入（AC11）。"""
+"""信任判定（依 CLI 的規則）、open 的信任政策、cchub new 的信任寫入。"""
 
 import json
 import os
@@ -25,7 +25,7 @@ def git(*args, cwd=None):
 
 
 class TrustAlgorithmTest(unittest.TestCase):
-    """F6：往上找、遇到 git 根就停、家目錄不算；worktree 用 canonical repo 根。"""
+    """跟 CLI 一樣往上找、遇到 git 根就停、家目錄不算；worktree 用 canonical repo 根。"""
 
     def setUp(self):
         self.h = helpers.TempHome()
@@ -93,7 +93,7 @@ class TrustAlgorithmTest(unittest.TestCase):
 
 
 class OpenPolicyTest(unittest.TestCase):
-    """AC12：繼承信任且含 .mcp.json／hooks 的拒絕；有自身信任紀錄的通過。"""
+    """繼承信任且含 .mcp.json／hooks 的拒絕；有自身信任紀錄的通過。"""
 
     def setUp(self):
         self.h = helpers.TempHome()
@@ -155,7 +155,7 @@ class OpenPolicyTest(unittest.TestCase):
 
 
 class TrustWriteTest(unittest.TestCase):
-    """AC11：信任只寫給同一次呼叫剛建立、只有模板的資料夾；除目標鍵外完全相同；備份只有 cchub- 前綴。"""
+    """信任只寫給同一次呼叫剛建立、只有模板的資料夾；除目標鍵外完全相同；備份只有 cchub- 前綴。"""
 
     def setUp(self):
         self.h = helpers.TempHome()
@@ -261,8 +261,8 @@ class TrustWriteTest(unittest.TestCase):
             self.grant(token="other-token")
         self.assert_untouched()
 
-    def test_D3_swapped_for_symlink_refused(self):
-        """D3：建好之後資料夾被換成指向既有資料夾的符號連結 → 信任鍵由 fd 決定，拒絕，受害資料夾不受信任。"""
+    def test_swapped_for_symlink_refused(self):
+        """建好之後資料夾被換成指向既有資料夾的符號連結 → 信任鍵由 fd 決定，拒絕，受害資料夾不受信任。"""
         victim = self.h.mkdir("secrets")
         os.rename(self.dir, self.dir + ".moved")
         os.symlink(victim, self.dir)
@@ -271,13 +271,13 @@ class TrustWriteTest(unittest.TestCase):
         self.assertIn("移動或換掉", str(cm.exception))
         self.assert_untouched()
 
-    def test_D3_renamed_within_root_refused(self):
+    def test_renamed_within_root_refused(self):
         os.rename(self.dir, os.path.join(self.h.project, "other-name"))
         with self.assertRaises(TrustRefused):
             self.grant()
         self.assert_untouched()
 
-    def test_D3_swap_inside_lock_refused(self):
+    def test_swap_inside_lock_refused(self):
         """鎖內的 precheck 再驗一次：第一次驗證後才被換掉也擋得住。"""
         victim = self.h.mkdir("secrets")
         orig = trust.verify_new_project
@@ -299,8 +299,8 @@ class TrustWriteTest(unittest.TestCase):
         self.assertIsNone(self.h.read_claude_json()["projects"].get(victim))
         self.assert_untouched()
 
-    def test_D11_lone_surrogate_aborts_cleanly(self):
-        """D11：~/.claude.json 有孤立 surrogate（JSON.stringify 會寫成 \\ud83d）→ 中止、可讀錯誤、不寫不備份。"""
+    def test_lone_surrogate_aborts_cleanly(self):
+        """~/.claude.json 有孤立 surrogate（JSON.stringify 會寫成 \\ud83d）→ 中止、可讀錯誤、不寫不備份。"""
         with open(self.p.claude_json, "w") as f:
             f.write('{\n  "x": "\\ud83d",\n  "projects": {}\n}')
         with open(self.p.claude_json, "rb") as f:

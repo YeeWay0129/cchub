@@ -1,4 +1,4 @@
-"""SPEC §5.1 規則 1–4：名稱驗證、名稱解析、同名偵測、systemd-escape、路徑安全。"""
+"""名稱驗證、名稱解析、同名偵測、systemd-escape、路徑安全。"""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from .paths import Config, UNIT_PREFIX
 from .util import CchubError, is_within
 
-NEW_NAME_RE = re.compile(r"[a-z0-9][a-z0-9-]{0,39}")   # 一律用 fullmatch（D6：$ 會讓尾端 \n 過關）
+NEW_NAME_RE = re.compile(r"[a-z0-9][a-z0-9-]{0,39}")   # 一律用 fullmatch（$ 會讓尾端 \n 過關）
 RESERVED_NAMES = frozenset({"entry", "hub", "cchub"})
 # stop/restart/logs 可以用這些字指入口
 ENTRY_ALIASES = frozenset({"entry", "hub", "入口"})
@@ -20,7 +20,7 @@ UNIT_NAME_MAX = 255
 
 
 def validate_new_name(name: str) -> str:
-    """§5.1 規則 2：格式 ^[a-z0-9][a-z0-9-]{0,39}$，保留字不能用。"""
+    """`new` 的名稱：格式 ^[a-z0-9][a-z0-9-]{0,39}$，保留字不能用。"""
     if not isinstance(name, str) or not NEW_NAME_RE.fullmatch(name):
         raise CchubError(
             f"新專案名稱「{name}」不合規則：只能用小寫英文、數字與 -，開頭不能是 -，最多 40 字"
@@ -115,7 +115,7 @@ def has_worktree_component(path: str) -> bool:
 
 
 def check_path_safety(real: str, cfg: Config, home: str) -> str:
-    """§5.1 規則 4：realpath 落在 allowed_roots 內；不能是根目錄本身、~，也不能在 .claude/worktrees/ 底下。"""
+    """路徑安全：realpath 落在 allowed_roots 內；不能是根目錄本身、~，也不能在 .claude/worktrees/ 底下。"""
     home_r = os.path.realpath(home)
     roots = [os.path.realpath(r) for r in cfg.allowed_roots]
     if real in ("/", home_r):
@@ -143,7 +143,7 @@ class Target:
 
 
 def resolve_target(target: str, cfg: Config, home: str) -> Target:
-    """§5.1 規則 1：接受絕對路徑，或在 allowed_roots 底下找同名資料夾；同名兩個以上就拒絕並列出。"""
+    """名稱解析：接受絕對路徑，或在 allowed_roots 底下找同名資料夾；同名兩個以上就拒絕並列出。"""
     given = target
     t = target or ""
     if not t.strip():

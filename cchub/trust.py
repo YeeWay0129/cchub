@@ -1,14 +1,16 @@
-"""信任相關：F6 判定演算法、§5.1 規則 5 的 open 政策、§5.2 的窄範圍信任寫入。
+"""信任相關：CLI 的信任判定演算法、`cchub open` 的信任政策、`cchub new` 的窄範圍信任寫入。
 
 設計重點（不可違反）：
 - 唯一會寫信任的入口是 grant_trust_for_new_project()，只給 `cchub new` 在同一次呼叫、
   剛建立、內容只有模板的資料夾使用。**沒有**任何「信任既有資料夾」的函式。
+  信任一個只有模板的空資料夾，不會讓任何既有的 hooks、MCP 或允許規則生效；
+  就算這一步被濫用，結果也只是多一個空專案。
 - 寫 ~/.claude.json 時用和 CLI 相同的 mkdir 鎖（<config>.lock），鎖內讀→備份→只改目標鍵→原子寫。
 
-F6 演算法依 CLI 判定信任的行為：
+判定演算法依 CLI 判定信任的行為：
 1. 先看「專案鍵」：資料夾所在 git 的 canonical 根（worktree → 主 repo 根），不在 git 裡就是資料夾本身。
 2. 再從資料夾往上走，每層看 projects[<層>].hasTrustDialogAccepted，**遇到 git 根就停**。
-保守差異：家目錄不算（F6：家目錄不存信任），也不會走到家目錄以上。
+保守差異：家目錄不算（CLI 不替家目錄保存信任），也不會走到家目錄以上。
 """
 
 from __future__ import annotations
@@ -24,7 +26,7 @@ from typing import Callable
 from .paths import Paths
 from .util import CchubError, atomic_write_bytes, dump_json, ensure_dir, is_within, read_json
 
-# §5.2 範本資料夾只能有這些東西：名稱 → 型別
+# 寫信任前，新資料夾只能有這些東西（名稱 → 型別）；多了任何東西就不寫信任
 TEMPLATE_ENTRIES = {"CLAUDE.md": "file", ".gitignore": "file", ".git": "dir"}
 PENDING_MAX_AGE = 60.0          # 暫存紀錄的有效秒數
 LOCK_RETRY_INTERVAL = 0.1       # mkdir 鎖重試間隔
@@ -47,18 +49,18 @@ CLI_PROJECT_DEFAULTS = {
     "hasClaudeMdExternalIncludesWarningShown": False,
 }
 
-# §5.1 規則 5：規格列的是 hooks、permissions 與 .mcp.json。
+# open 政策認定「會自動生效」的設定：基本的是 .claude/settings*.json 的 hooks、permissions，以及 .mcp.json。
 # 保守擴充：其他同樣會在 session 啟動時執行指令或載入 MCP 的設定鍵也算。
-SPEC_RISKY_KEYS = ("hooks", "permissions")
+BASE_RISKY_KEYS = ("hooks", "permissions")
 EXTRA_RISKY_KEYS = (
     "env", "apiKeyHelper", "statusLine", "mcpServers", "enabledMcpjsonServers",
     "enableAllProjectMcpServers", "awsAuthRefresh", "awsCredentialExport", "otelHeadersHelper",
 )
-RISKY_SETTINGS_KEYS = SPEC_RISKY_KEYS + EXTRA_RISKY_KEYS
+RISKY_SETTINGS_KEYS = BASE_RISKY_KEYS + EXTRA_RISKY_KEYS
 
 
 class TrustRefused(CchubError):
-    """§5.2 自我驗證不通過：不寫信任。"""
+    """寫信任前的自我驗證不通過：不寫信任。"""
 
 
 # ---------------------------------------------------------------- 讀 ~/.claude.json
@@ -136,7 +138,7 @@ def canonical_repo_root(git_root: str) -> str:
         return git_root
 
 
-# ---------------------------------------------------------------- F6 判定
+# ---------------------------------------------------------------- 信任判定（依 CLI 的規則）
 
 @dataclass(frozen=True)
 class TrustInfo:
@@ -209,7 +211,11 @@ def risky_configs(path: str) -> list[str]:
 
 
 def check_open_policy(path: str, claude_cfg: dict, home: str) -> TrustInfo:
-    """§5.1 規則 5。通過回傳 TrustInfo，不通過丟 CchubError。"""
+    """open 的信任政策：資料夾必須受信任；信任若是繼承自上層（本身沒有紀錄），而資料夾裡又有
+    會自動生效的設定（hooks、MCP…）→ 拒絕。信任上層資料夾時，使用者可能沒意識到它涵蓋了
+    底下所有非 git 資料夾，所以這種資料夾要回電腦用官方對話框審閱一次。
+
+    通過回傳 TrustInfo，不通過丟 CchubError。"""
     info = trust_info(path, claude_cfg, home)
     if not info.trusted:
         raise CchubError(
@@ -229,7 +235,7 @@ def check_open_policy(path: str, claude_cfg: dict, home: str) -> TrustInfo:
     return info
 
 
-# ---------------------------------------------------------------- §5.2 信任寫入
+# ---------------------------------------------------------------- 信任寫入（只給 cchub new）
 
 class ClaudeJsonLock:
     """和 CLI 相容的 mkdir 鎖：<config>.lock。"""
@@ -325,7 +331,7 @@ def rotate_backups(backups_dir: str, keep: int = BACKUP_KEEP) -> list[str]:
 
 def verify_new_project(paths: Paths, dir_fd: int, token: str, now: float, expected_path: str,
                        projects_root: str) -> str:
-    """§5.2 寫入前的自我驗證（綁 inode，D3）；任一條不成立就丟 TrustRefused。回傳信任鍵。
+    """寫入前的自我驗證（綁 inode，路徑中途被換掉也騙不過）；任一條不成立就丟 TrustRefused。回傳信任鍵。
 
     - registry 有這次呼叫的暫存紀錄、60 秒內、記錄的資料夾就是 expected_path
     - 用建立時開的目錄 fd 驗證：st_dev/st_ino 與建立時相同；內容（os.listdir(fd)）只有模板
@@ -422,7 +428,7 @@ def _locked_update(paths: Paths, mutate: Callable[[dict], None], *, wall, clock,
         mutate(new)
         if new == data:
             return None
-        # 先序列化＋編碼完（D11）：失敗就中止，不備份也不寫
+        # 先序列化＋編碼完再動檔案（例如含孤立 surrogate 字元時編碼會失敗）：失敗就乾淨中止，不備份也不寫
         try:
             payload = dump_json(new).encode("utf-8")
         except (TypeError, ValueError, UnicodeEncodeError) as e:
@@ -450,9 +456,10 @@ def grant_trust_for_new_project(paths: Paths, dir_fd: int, token: str, expected_
                                 clock: Callable[[], float] = time.monotonic,
                                 sleep: Callable[[float], None] = time.sleep,
                                 log: Callable[[str], None] = lambda s: None) -> str:
-    """§5.2：只替 `cchub new` 同一次呼叫剛建立、只有模板的資料夾寫信任。回傳寫入的鍵。
+    """只替 `cchub new` 同一次呼叫剛建立、只有模板的資料夾寫信任。回傳寫入的鍵。
 
-    dir_fd 是 new 建立資料夾後立刻用 O_DIRECTORY|O_NOFOLLOW 開的 fd；信任鍵由它的真實路徑決定（D3）。
+    dir_fd 是 new 建立資料夾後立刻用 O_DIRECTORY|O_NOFOLLOW 開的 fd；信任鍵由它的真實路徑決定，
+    路徑中途被換成 symlink 或改名，也不會信任到別的資料夾。
     """
     key = verify_new_project(paths, dir_fd, token, wall(), expected_path, projects_root)
 

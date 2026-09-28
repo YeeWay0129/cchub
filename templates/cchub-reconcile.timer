@@ -1,4 +1,4 @@
-# 每 5 分鐘跑一次 cchub _reconcile（SPEC §5.3）
+# 每 5 分鐘跑一次 cchub _reconcile
 [Unit]
 Description=cchub reconcile timer (every 5 min)
 

@@ -1,4 +1,4 @@
-"""units：上限計數（AC13 第 7 個被拒）、flock 互斥、systemctl 包裝、實例檔；procfs 對假的 /proc 樹。"""
+"""units：上限計數（第 7 個專案伺服器被拒）、flock 互斥、systemctl 包裝、實例檔；procfs 對假的 /proc 樹。"""
 
 import os
 import threading

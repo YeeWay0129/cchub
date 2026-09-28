@@ -1,4 +1,4 @@
-"""cchub CLI（SPEC §5.1）。
+"""cchub CLI。
 
 依賴（systemctl、/proc、時鐘、git、終端機）都放在 Context 裡，測試時注入假的。
 """
@@ -51,7 +51,7 @@ PENDING_PRUNE_SECONDS = 3600
 
 
 def git_init(dir_fd: int) -> None:
-    """在 new 建立時開的目錄 fd 裡 git init（cwd＝/proc/self/fd/N），路徑被換掉也不會落到別處（D3）。"""
+    """在 new 建立時開的目錄 fd 裡 git init（cwd＝/proc/self/fd/N），路徑被換掉也不會落到別處。"""
     env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
     try:
         r = subprocess.run(["git", "init", "-q"], cwd=f"/proc/self/fd/{dir_fd}", pass_fds=(dir_fd,), env=env,
@@ -73,7 +73,7 @@ class Context:
     out: TextIO | None = None
     err: TextIO | None = None
     git: Callable[[str], None] = git_init
-    wait_seconds: float = 50.0          # §5.1 規則 11：最多等 50 秒
+    wait_seconds: float = 50.0          # 最多等 50 秒；還沒上線就回報「還在啟動中」，不讓這一輪一直卡著
     poll_interval: float = 1.0
     lock_timeout: float = 120.0
     isatty: Callable[[], bool] = field(default=lambda: sys.stdin.isatty())
@@ -109,7 +109,7 @@ def _entry(cfg: Config) -> tuple[str, str, str]:
 
 
 def card_label(path: str) -> str:
-    """手機卡片上的標籤取 git root（F10）；不在 git 裡就是資料夾名稱。"""
+    """手機卡片上的標籤取 git root（這是 CLI 的行為，--name 改不了）；不在 git 裡就是資料夾名稱。"""
     root = find_git_root(path)
     return os.path.basename(root or path) or path
 
@@ -146,7 +146,8 @@ class WaitResult:
 
 
 def _is_already_served(last: dict, detail) -> bool:
-    """§5.1 規則 8：完全吻合的 409，或內容含「already served」的註冊失敗（N3）。"""
+    """資料夾已由其他程序服務：完全吻合的預設 409 原文，或 detail 含「already served」的註冊失敗
+    （伺服器回的 409 文字不一定是 CLI 預設的那一句）。"""
     kind = last.get("kind") if isinstance(last, dict) else None
     if kind == "already_served":
         return True
@@ -154,7 +155,7 @@ def _is_already_served(last: dict, detail) -> bool:
 
 
 def reason_of(st: dict) -> str | None:
-    """狀態檔裡最值得給人看的原因：永久性錯誤優先，其次是上次的錯誤＋detail（N3）。"""
+    """狀態檔裡最值得給人看的原因：永久性錯誤優先，其次是上次的錯誤＋detail。"""
     err = st.get("error") if isinstance(st.get("error"), dict) else None
     if err and err.get("message"):
         return str(err["message"])
@@ -166,7 +167,7 @@ def reason_of(st: dict) -> str | None:
 
 
 def wait_ready(ctx: Context, inst: str, unit: str, request_time: float) -> WaitResult:
-    """§5.1 規則 11：最多等 wait_seconds 秒，結果分 ready／starting／failed。"""
+    """最多等 wait_seconds 秒，結果分 ready／starting／failed。"""
     start = ctx.clock()
     while True:
         st = read_instance_state(ctx.paths, inst)
@@ -180,7 +181,7 @@ def wait_ready(ctx: Context, inst: str, unit: str, request_time: float) -> WaitR
             return WaitResult("failed", st, act, waited)
         last = st.get("last_error") if fresh and isinstance(st.get("last_error"), dict) else {}
         if _is_already_served(last, st.get("last_error_detail") if fresh else None):
-            # stderr 上的 409（CLI 會再等 45–75 秒才結束）→ 依規則 8 視為已由別人服務
+            # stderr 上的 409（CLI 會再等 45–75 秒才結束）→ 不等它結束，直接視為已由別的程序服務
             return WaitResult("failed", dict(st, error=dict(last, kind="already_served", permanent=False)), act, waited)
         if act in ("failed", "inactive") and (fresh or waited > 3):
             return WaitResult("failed", st if fresh else {}, act, waited)
@@ -194,7 +195,7 @@ def report(ctx: Context, res: WaitResult, *, name: str, label: str, path: str, m
     st = res.state
     lines = [str(x) for x in (st.get("recent") or [])[-10:]]
     if res.kind == "ready":
-        # §5.1 規則 11：成功時第一行固定
+        # 成功時第一行格式固定：skill 照這一行轉述，告訴使用者到卡片選哪一筆
         ctx.say(f"✅ {name} 已上線：到 Claude App → Code → 這台電腦的卡片 → 選「{label}」開新 session")
         ctx.say(f"資料夾：{path}（權限模式 {mode}，capacity {capacity}）")
         for w in st.get("warnings") or []:
@@ -388,7 +389,7 @@ BRIEF_MAX = 20000
 
 
 def _read_brief(ctx: Context, args) -> str:
-    """需求只能從 stdin 傳入（--brief-stdin，N6）：原話不經過 shell 的參數展開。"""
+    """需求只能從 stdin 傳入（--brief-stdin）：原話不經過 shell 的參數展開。"""
     text = ""
     if args.brief_stdin:
         assert ctx.stdin is not None
@@ -439,7 +440,8 @@ def cmd_new(ctx: Context, args) -> int:
                 os.mkdir(target, 0o755)
             except FileExistsError:
                 raise CchubError(f"「{name}」已存在：{target}")
-            # 建好立刻開 fd（O_NOFOLLOW），之後的寫檔、git init、信任驗證都綁在這個 inode 上（D3）
+            # 建好立刻開 fd（O_NOFOLLOW），之後的寫檔、git init、信任驗證都綁在這個 inode 上：
+            # 路徑中途被換成 symlink 或改名，也不會寫到、信任到別的資料夾
             dir_fd = os.open(target, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
             st = os.fstat(dir_fd)
             _registry_update(ctx, lambda reg: reg["pending_new"][token].update(ino=st.st_ino, dev=st.st_dev))
@@ -448,7 +450,8 @@ def cmd_new(ctx: Context, args) -> int:
             if use_git:
                 _write_new_file(dir_fd, ".gitignore", GITIGNORE)
                 ctx.git(dir_fd)
-                # §5.2：只替這次呼叫剛建立、只有模板的資料夾寫信任
+                # 只替這次呼叫剛建立、只有模板的資料夾寫信任：
+                # 空資料夾沒有 hooks、MCP 或允許規則，信任它不會讓任何既有設定生效
                 trust_key = grant_trust_for_new_project(p, dir_fd, token, target, root, wall=ctx.wall,
                                                         clock=ctx.clock, sleep=ctx.sleep,
                                                         log=lambda s: print(f"  {s}", file=ctx.err))
@@ -477,7 +480,7 @@ def cmd_new(ctx: Context, args) -> int:
         ctx.systemctl.start(unit)
     res = wait_ready(ctx, inst, unit, request_time)
     if res.kind == "failed" and (res.state.get("error") or {}).get("kind") == "untrusted":
-        # §5.2 第 4 步：生效驗證失敗 → 回報並停掉單元
+        # 生效驗證：寫了信任，CLI 卻仍說未受信任（例如 CLI 改了信任的存法）→ 回報並停掉單元
         ctx.systemctl.stop(unit)
         ctx.say(f"❌ {name} 的信任寫入沒有生效（CLI 仍回報 Workspace not trusted），已停掉伺服器。"
                 f"資料夾已建立在 {target}；請回電腦在那裡執行一次 claude 接受信任，之後用 cchub open {name}")
@@ -526,7 +529,7 @@ def cmd_restart(ctx: Context, args) -> int:
     label = card_label(t.path)
     _require_installed(ctx)
     with _lock(ctx):
-        # §5.1 規則 9：在 cchub 單元裡重啟入口（或自己所在的伺服器）→ 延後 15 秒排程
+        # 在 cchub 單元裡重啟入口（或自己所在的伺服器）→ 延後 15 秒排程：立刻重啟會砍掉正在回覆的這個 session
         if (t.is_entry and ctx.procfs.in_cchub_unit()) or ctx.procfs.current_unit() == unit:
             _run_delayed(ctx, delayed_action_argv("restart", unit))
             ctx.say(f"⏳ 已排程：15 秒後重啟「{label}」。你正在 cchub 管理的 session 裡，先讓這一輪回覆完；"
@@ -599,7 +602,7 @@ def cmd_doctor(ctx: Context, args=None) -> int:
         user = pwd.getpwuid(os.getuid()).pw_name
         r = ctx.systemctl.runner(["loginctl", "show-user", user, "-p", "Linger", "--value"])
         linger = (r.stdout or "").strip()
-        add("ok" if linger == "yes" else "warn", f"Linger={linger or '未知'}（開機未登入桌面時也要起入口，F21）")
+        add("ok" if linger == "yes" else "warn", f"Linger={linger or '未知'}（開機未登入桌面時也要起入口）")
     except (KeyError, OSError):
         add("warn", "無法查 Linger")
 
@@ -615,9 +618,9 @@ def cmd_doctor(ctx: Context, args=None) -> int:
         cj = {}
         add("fail", str(e))
     add("ok" if cj.get("remoteDialogSeen") is True else "fail",
-        "Remote Control 一次性同意（F9）：" + ("已回答" if cj.get("remoteDialogSeen") is True
-                                            else "還沒回答 → 在電腦上執行一次 claude remote-control 並回答 y"))
-    add("info", "CLI 登入是否過期無法事前偵測（F5）；失效時伺服器會以 auth 錯誤停下，cchub ls 會顯示")
+        "Remote Control 一次性同意：" + ("已回答" if cj.get("remoteDialogSeen") is True
+                                      else "還沒回答 → 在電腦上執行一次 claude remote-control 並回答 y"))
+    add("info", "CLI 登入是否過期無法事前偵測（claude auth status 沒有到期資訊）；失效時伺服器會以 auth 錯誤停下，cchub ls 會顯示")
     ti = trust_info(entry_real, cj, p.home)
     add("ok" if ti.trusted else "fail", f"入口資料夾 {entry_real}：" + ("受信任" if ti.trusted else "未受信任"))
 
@@ -625,7 +628,7 @@ def cmd_doctor(ctx: Context, args=None) -> int:
     marker = os.path.join(p.install_dir, INSTALL_MARKER)
     if os.path.exists(marker):
         inside = any(is_within(os.path.realpath(p.install_dir), os.path.realpath(r)) for r in cfg.allowed_roots)
-        add("fail" if inside else "ok", f"安裝目錄 {p.install_dir}" + ("（在允許根目錄內！入口可以改寫它，T11）" if inside else ""))
+        add("fail" if inside else "ok", f"安裝目錄 {p.install_dir}" + ("（在允許根目錄內！入口可以改寫它）" if inside else ""))
     else:
         add("warn", f"尚未安裝到 {p.install_dir}（cchub install）")
     link_ok = os.path.islink(p.bin_link) and os.readlink(p.bin_link) == p.install_bin
@@ -639,7 +642,7 @@ def cmd_doctor(ctx: Context, args=None) -> int:
         ask = ((settings.get("permissions") or {}).get("ask") or []) if isinstance(settings, dict) else []
         missing = [r for r in ASK_RULES if r not in ask]
         add("ok" if not missing else "warn",
-            "使用者層級 ask 規則（F23，體驗層）：" + ("齊全" if not missing else "缺 " + "、".join(missing)))
+            "使用者層級 ask 規則（體驗層，不是安全邊界）：" + ("齊全" if not missing else "缺 " + "、".join(missing)))
     except CchubError as e:
         add("warn", f"讀不到 {p.claude_settings}：{e}")
     add("ok" if ctx.systemctl.is_enabled(RECONCILE_TIMER) == "enabled" else "warn",
@@ -659,7 +662,7 @@ def cmd_doctor(ctx: Context, args=None) -> int:
     add("info", f"目前在 cchub 單元裡：{cur}" if cur else "目前不在 cchub 單元裡（電腦終端機或其他 session）")
     for proc in ctx.procfs.rc_processes():
         if proc.cchub_unit is None:
-            add("warn", f"手動開的 Remote Control：pid {proc.pid}，資料夾 {proc.cwd}（上線前請 Ctrl+C 關掉，§5.4）")
+            add("warn", f"手動開的 Remote Control：pid {proc.pid}，資料夾 {proc.cwd}（上線前請 Ctrl+C 關掉：同一個資料夾只能由一個伺服器服務）")
     flush()
 
     untrusted, risky = [], []
@@ -699,7 +702,7 @@ def _refuse_in_unit(ctx: Context, what: str) -> None:
 
 
 def _require_own_terminal(ctx: Context, what: str) -> None:
-    """真的安裝／移除：必須是你自己的終端機（D4）。
+    """真的安裝／移除：必須是你自己的終端機。
 
     - 在 Claude Code session 的 Bash 裡（有 CLAUDECODE 環境變數）一律拒絕
     - stdin 必須是 TTY，而且要手動輸入 yes（沒有可以跳過確認的旗標）

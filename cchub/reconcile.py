@@ -1,8 +1,9 @@
-"""§5.3 `cchub _reconcile`（cchub-reconcile.timer 每 5 分鐘觸發）。
+"""`cchub _reconcile`（cchub-reconcile.timer 每 5 分鐘觸發）。
 
-- 伺服器的 /proc/<pid>/exe 已被刪除（F14：更新刪掉舊版），且 10 分鐘內狀態沒有變化 → 重啟（_serve 會挑新版）。
+- 伺服器的 /proc/<pid>/exe 已被刪除（更新刪掉了舊版，這個伺服器之後開不出新 session），
+  且 10 分鐘內狀態沒有變化 → 重啟（_serve 會挑新版）。
 - 入口沒在跑：一般情況 → 啟動；狀態檔有永久性錯誤 → 每 30 分鐘才重試一次（重新登入後會自己恢復）。
-- 不自動停閒置伺服器（使用者決定，§12 Q4）。
+- 不自動停閒置伺服器（刻意的選擇：伺服器留著，手機隨時能用；要停就 cchub stop）。
 """
 
 from __future__ import annotations
@@ -60,7 +61,7 @@ def run_reconcile(paths: Paths, systemctl: Systemctl, procfs: ProcFS, *,
         if age < EXE_STABLE_SECONDS:
             out(f"[reconcile] {unit}：執行檔已被刪除，但狀態 {int(age)} 秒前才變過，下一輪再看")
             continue
-        out(f"[reconcile] {unit}：執行檔已被更新刪除（F14），重啟以換成新版")
+        out(f"[reconcile] {unit}：執行檔已被更新刪除，重啟以換成新版")
         try:
             systemctl.restart(unit)
         except CchubError as e:

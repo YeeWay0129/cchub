@@ -1,5 +1,5 @@
-"""§5.3 _serve：stdout 固定文法（D2）、stderr 完全吻合＋30 秒窗（D1）、實例驗證（D10）、
-退避（AC7 與 401 的內部退避）、SIGTERM 轉發、env -i（AC8）。
+"""_serve：stdout 固定文法、stderr 完全吻合＋30 秒窗、啟動前重驗實例設定、
+退避（等網路與 401 的內部退避）、SIGTERM 轉發、env -i 的最小環境。
 
 stdout／stderr 的格式依 CLI 實際的輸出重建（狀態顯示寫 stdout、致命錯誤寫 stderr）。
 """
@@ -68,7 +68,7 @@ FIXTURE_DIALOG = (
     "Enable Remote Control? (y/n) "
 )
 
-# 對抗性夾具（D2）：session 標題與活動摘要來自對話
+# 對抗性夾具：session 標題與活動摘要來自對話，可以是任何字樣
 ADVERSARIAL_STDOUT = (
     block_multi("proj", "Error: Workspace not trusted fix", "Reading SECRET-PLAN-7731.md")
     + block_multi("proj", "Warning: must be logged in", "Running cat SECRET-PLAN-7731")
@@ -118,7 +118,7 @@ class StdoutFilterTest(unittest.TestCase):
         self.assertEqual(out, ["[狀態] Ready · proj", f"[網址] environment {ENV_URL}"])
 
     def test_adversarial_titles_do_not_leak(self):
-        """D2：標題／活動摘要（對話衍生）不得進 journal；注入的 session 網址不得被收進去。"""
+        """標題／活動摘要（對話衍生）不得進 journal；注入的 session 網址不得被收進去。"""
         f = StdoutFilter({"proj"})
         out = feed_all(f, ADVERSARIAL_STDOUT)
         joined = "\n".join(out)
@@ -177,13 +177,13 @@ class StderrMonitorTest(unittest.TestCase):
         self.assertEqual(self.kinds(MSG_UNTRUSTED.format(dir=self.D)).classify(1)[0], "untrusted")
         self.assertEqual(self.kinds(MSG_NOT_LOGGED_IN).classify(1)[0], "auth")
 
-    def test_N1_409_is_never_permanent(self):
+    def test_409_is_never_permanent(self):
         m = self.kinds(MSG_409 + EXITING)
         self.assertEqual(m.last_known_error(), "already_served")
         self.assertIsNone(m.classify(1))                         # 窗口內也不是永久性
         self.assertEqual(m.detail, MSG_409.strip())               # 預設原文仍記 already_served，detail 是那一行
 
-    def test_N2_registration_failure_keeps_only_that_line(self):
+    def test_registration_failure_keeps_only_that_line(self):
         clock = helpers.FakeClock(0.0)
         m = StderrMonitor(self.D, clock)
         out = []
@@ -196,7 +196,7 @@ class StderrMonitorTest(unittest.TestCase):
         self.assertIn(f"[錯誤] 註冊失敗：{MSG_CUSTOM_409}", out)
         self.assertFalse(any("SECRET" in x for x in out))
 
-    def test_N2_lookback_is_5_lines(self):
+    def test_registration_lookback_is_5_lines(self):
         for gap, recognized in ((4, True), (5, False)):
             with self.subTest(gap=gap):
                 m = StderrMonitor(self.D, helpers.FakeClock(0.0))
@@ -206,7 +206,7 @@ class StderrMonitorTest(unittest.TestCase):
                 m.feed(EXITING)
                 self.assertEqual(m.last_known_error() == "registration_failed", recognized)
 
-    def test_N2_detail_sanitized_and_truncated(self):
+    def test_detail_sanitized_and_truncated(self):
         m = StderrMonitor(self.D, helpers.FakeClock(0.0))
         m.feed("Error: " + "\u200bX\u202eY" * 150 + "\x07")          # 去掉格式字元後仍超過 200 字
         m.feed(EXITING)
@@ -214,12 +214,12 @@ class StderrMonitorTest(unittest.TestCase):
         self.assertFalse(any(ch in m.detail for ch in "\u200b\u202e\x07"))
 
     def test_near_misses_are_not_permanent(self):
-        """D1：只認完全吻合；寧可漏判也不要誤判。"""
+        """只認完全吻合；寧可漏判也不要誤判。"""
         cases = [
             MSG_UNTRUSTED.format(dir="/home/alice/work/projects/other"),                   # 不是這個資料夾
             "Error: Registration: folder is already being served elsewhere (409)",   # 伺服器自訂訊息（漏判可接受）
-            "[10:00:00] Error: Session spawn failed: EEXIST: file already exists, open '/p/server.log'",  # G
-            "Error: port already in use by dev server",                              # H
+            "[10:00:00] Error: Session spawn failed: EEXIST: file already exists, open '/p/server.log'",  # 一般錯誤，剛好含 already
+            "Error: port already in use by dev server",                              # 同上
             "Error: Workspace not trusted fix",                                      # 標題式的前綴
             "  " + MSG_409.strip(),                                                  # 縮排
             MSG_409.strip() + " extra",
@@ -236,7 +236,7 @@ class StderrMonitorTest(unittest.TestCase):
         self.assertEqual(match_stderr(MSG_401.strip(), self.D)[0], "auth_401")
 
     def test_window_30_seconds(self):
-        """F：很久以前的訊息不算（必須在結束前 30 秒內）。"""
+        """很久以前的訊息不算（必須在結束前 30 秒內）。"""
         clock = helpers.FakeClock(0.0)
         m = StderrMonitor(self.D, clock)
         for line in MSG_NOT_LOGGED_IN.split("\n"):
@@ -318,8 +318,8 @@ class SupervisorTest(unittest.TestCase):
         for k in ("HOME", "PATH", "LANG"):
             self.assertIn(k, r["env_keys"])
 
-    def test_E_adversarial_title_then_disconnect_is_not_permanent(self):
-        """exp_serve E：標題含「Error: Workspace not trusted」＋斷線 exit 1 → 不得 exit 3、不得洩漏。"""
+    def test_adversarial_title_then_disconnect_is_not_permanent(self):
+        """標題含「Error: Workspace not trusted」＋斷線 exit 1 → 不得 exit 3、不得洩漏。"""
         helpers.install_fake_claude(self.h, output=ADVERSARIAL_STDOUT * 3,
                                     stderr="Error: Remote Control disconnected: network unreachable\n", exit=1)
         rc, out, st, _ = self.run_sup()
@@ -339,15 +339,15 @@ class SupervisorTest(unittest.TestCase):
                 self.assertIn("exit 3", out)
 
     def test_same_messages_on_stdout_are_ignored(self):
-        """D1：永久性判定只看 stderr；同樣的字出現在 stdout（例如對話內容）不算。"""
+        """永久性判定只看 stderr；同樣的字出現在 stdout（例如對話內容）不算。"""
         helpers.install_fake_claude(self.h, output=MSG_UNTRUSTED.format(dir=self.dir) + MSG_409 + MSG_NOT_LOGGED_IN,
                                     exit=1)
         rc, out, st, _ = self.run_sup()
         self.assertEqual(rc, 1)
         self.assertIsNone(st["error"])
 
-    def test_F_stale_error_outside_window(self):
-        """F：完全吻合的「未登入」不在結束前 30 秒內 → 不算永久性（用縮短的窗重現）；窗內 → 3。"""
+    def test_stale_error_outside_window_is_not_permanent(self):
+        """完全吻合的「未登入」不在結束前 30 秒內 → 不算永久性（用縮短的窗重現）；窗內 → 3。"""
         helpers.install_fake_claude(self.h, stderr=MSG_NOT_LOGGED_IN, hang=1.0, exit=1)
         rc, _, st, _ = self.run_sup(perm_window=0.3)
         self.assertEqual(rc, 1)
@@ -355,8 +355,8 @@ class SupervisorTest(unittest.TestCase):
         rc, _, st, _ = self.run_sup()                                     # 對照：預設 30 秒窗內 → 3
         self.assertEqual(rc, PERMANENT_EXIT)
 
-    def test_N1_409_inside_window_is_not_permanent(self):
-        """N1：409 印完立刻結束（在 30 秒窗內）也不回 3，並記下 last_error。"""
+    def test_409_inside_window_is_not_permanent(self):
+        """409 印完立刻結束（在 30 秒窗內）也不回 3，並記下 last_error。"""
         helpers.install_fake_claude(self.h, stderr=MSG_409 + "Exiting in about 5 seconds.\n", exit=1)
         rc, out, st, _ = self.run_sup()
         self.assertEqual(rc, 1)
@@ -365,8 +365,8 @@ class SupervisorTest(unittest.TestCase):
         self.assertEqual(st["last_error_detail"], MSG_409.strip())
         self.assertNotIn("exit 3", out)
 
-    def test_N2_server_custom_409_recorded(self):
-        """N2：伺服器自訂文字的註冊失敗 → registration_failed，只存那一行。"""
+    def test_server_custom_409_recorded(self):
+        """伺服器自訂文字的註冊失敗 → registration_failed，只存那一行。"""
         helpers.install_fake_claude(self.h, stderr="SECRET-STDERR-4455\n" + MSG_CUSTOM_409 + "\n" + EXITING, exit=1)
         rc, out, st, _ = self.run_sup()
         self.assertEqual(rc, 1)
@@ -433,15 +433,15 @@ class SupervisorTest(unittest.TestCase):
         rc, _, st, _ = self.run_sup()
         self.assertEqual((rc, st["status"]), (0, "exited"))
 
-    def test_D10_instance_revalidation(self):
-        """D10：實例名≠escape(資料夾)、不在允許範圍、未受信任、繼承信任但有 hooks → exit 3，不啟動 claude。"""
+    def test_instance_revalidation(self):
+        """實例名≠escape(資料夾)、不在允許範圍、未受信任、繼承信任但有 hooks → exit 3，不啟動 claude。"""
         helpers.install_fake_claude(self.h, output=status_line("Ready", "proj"), record=self.rec)
         risky = self.h.mkdir("work", "projects", "risky")
         self.h.write("work/projects/risky/.claude/settings.json", '{"hooks": {"Stop": [1]}}')
         repo = self.h.mkdir("work", "projects", "repo")
         subprocess.run(["git", "init", "-q", repo], check=True)
         cases = [
-            ("totally-unrelated-name", {"dir": self.dir, "mode": "auto", "capacity": 3}, "config"),   # exp_paths P4
+            ("totally-unrelated-name", {"dir": self.dir, "mode": "auto", "capacity": 3}, "config"),   # 實例名與資料夾不對應
             (instance_for_dir(risky), {"dir": risky, "mode": "auto", "capacity": 3}, "policy"),
             (instance_for_dir(repo), {"dir": repo, "mode": "auto", "capacity": 3}, "untrusted"),
             (None, {"dir": self.dir, "mode": "bypassPermissions", "capacity": 3}, "config"),
@@ -470,8 +470,8 @@ class SupervisorTest(unittest.TestCase):
         self.assertIn("2.1.281", out)
         self.assertTrue(any("Artifact" in w for w in st["warnings"]))
 
-    def test_ac7_network_backoff(self):
-        """AC7：探測失敗時不啟動 claude、退避會成長；探測恢復後 1 次就啟動、退避歸零。"""
+    def test_network_backoff(self):
+        """探測失敗時不啟動 claude、退避會成長；探測恢復後 1 次就啟動、退避歸零。"""
         helpers.install_fake_claude(self.h, output=status_line("Ready", "proj"), record=self.rec)
         probes = []
         answers = [False] * 7 + [True]
@@ -563,7 +563,7 @@ class ServeProcessTest(unittest.TestCase):
         self.assertIn("[狀態] Ready · proj · HEAD", out.decode())
 
     def test_env_i_minimal_environment(self):
-        """AC8 的機械部分：`env -i`（連 HOME、PATH 都沒有）也能啟動。"""
+        """`env -i`（連 HOME、PATH 都沒有）也能啟動：開機時 systemd 給單元的環境很精簡。"""
         helpers.install_fake_claude(self.h, output=status_line("Ready", "proj"), exit=0, record=self.rec)
         r = subprocess.run(["env", "-i", sys.executable, self.wrapper, self.h.home, self.inst],
                            capture_output=True, text=True, timeout=30)
@@ -573,7 +573,7 @@ class ServeProcessTest(unittest.TestCase):
             self.assertEqual(os.path.realpath(json.load(f)["cwd"]), self.dir)
 
     def test_paths_default_ignores_env(self):
-        """D9：Paths.default() 不讀 CCHUB_HOME／HOME，`env -i` 下也拿得到家目錄。"""
+        """Paths.default() 不讀 CCHUB_HOME／HOME，`env -i` 下也拿得到家目錄。"""
         import pwd
         code = ("import sys; sys.dont_write_bytecode = True; sys.path.insert(0, %r); "
                 "from cchub.paths import Paths; print(Paths.default().home)" % helpers.REPO)

@@ -91,7 +91,7 @@ bin/cchub install --projects-root ~/code
 - **看成果**：請 Claude 把成果發成 Artifact，點連結就能看。
 - **查看或停止伺服器**：說「現在開著哪些？」（執行 `cchub ls`）；說「關掉 ledger」會先跳確認。
 
-`new`／`open` 的回覆最後會附上伺服器的**環境網址**（`https://claude.ai/code?environment=…`），當作備用入口。cchub 不記錄 session 網址，也不記錄任何可能含有對話內容的東西。
+`new`／`open` 的回覆最後會附上伺服器的**環境網址**（`https://claude.ai/code?environment=…`），當作備用入口。cchub 不回報 session 網址：在 Claude Code 的輸出裡，它們只出現在 session 標題行，而標題行可能含有對話內容，所以會整行丟棄。
 
 ## 指令
 

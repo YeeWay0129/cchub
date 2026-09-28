@@ -1,4 +1,4 @@
-"""CLI：AC9 全部拒絕案例、new／open／stop／restart／ls／logs／doctor 流程、AC13 並行 new。"""
+"""CLI：該拒絕的輸入全部被拒、new／open／stop／restart／ls／logs／doctor 流程、並行的 new。"""
 
 import contextlib
 import io
@@ -42,7 +42,7 @@ class Base(unittest.TestCase):
 
 
 class RejectTest(Base):
-    """AC9：以下全部被拒，而且沒有任何副作用。"""
+    """以下全部被拒，而且沒有任何副作用。"""
 
     def test_all_rejections(self):
         self.h.mkdir("work", "projects", "foo", ".claude", "worktrees", "w1")
@@ -92,7 +92,7 @@ class NewTest(Base):
         lines = out.strip().splitlines()
         first = next(x for x in lines if x.startswith("✅"))
         self.assertEqual(first, "✅ ledger 已上線：到 Claude App → Code → 這台電腦的卡片 → 選「ledger」開新 session")
-        self.assertEqual(lines[-1], "備用網址：https://claude.ai/code?environment=env_TEST123")   # 環境網址（N5）
+        self.assertEqual(lines[-1], "備用網址：https://claude.ai/code?environment=env_TEST123")   # 備用網址是環境網址（不回報 session 網址）
         with open(os.path.join(d, "CLAUDE.md"), encoding="utf-8") as f:
             md = f.read()
         self.assertIn("## 初始需求", md)
@@ -117,7 +117,7 @@ class NewTest(Base):
         self.assertIn("cchub install", err)
         self.assertFalse(os.path.exists(os.path.join(self.h.project, "ledger")))
 
-    def test_N6_brief_option_removed(self):
+    def test_brief_option_removed(self):
         buf = io.StringIO()
         with self.assertRaises(SystemExit) as cm, contextlib.redirect_stderr(buf):
             main(["new", "ledger", "--brief", "做記帳工具"], ctx=self.ctx())
@@ -161,7 +161,7 @@ class NewTest(Base):
         self.assertFalse(os.path.exists(os.path.join(self.h.project, "seventh")))
 
     def test_concurrent_new_same_name(self):
-        """AC13：兩個 new 同時跑，flock 讓它們排隊，不會兩個都成功。"""
+        """兩個 new 同時跑，flock 讓它們排隊，不會兩個都成功。"""
         results = []
 
         def slow_git(dir_fd):
@@ -185,7 +185,7 @@ class NewTest(Base):
         self.assertEqual(read_registry(self.h.paths)["trust_keys"], [os.path.join(self.h.project, "race")])
 
     def test_concurrent_new_is_serialized_by_flock(self):
-        """AC13：不同名稱的兩個 new 同時跑，臨界區（建資料夾→git→信任→起單元）不能重疊。拿掉 flock 這個測試會失敗。"""
+        """不同名稱的兩個 new 同時跑，臨界區（建資料夾→git→信任→起單元）不能重疊。拿掉 flock 這個測試會失敗。"""
         spans = []
         lock = threading.Lock()
 
@@ -251,8 +251,8 @@ class OpenTest(Base):
         self.assertIn("409", out)
         self.assertEqual([c[-1] for c in self.sysd.cmds("stop")], [self.unit_of(self.plain)])
 
-    def test_open_rule8_registration_failed_already_served(self):
-        """N3：伺服器自訂文字的註冊失敗，內容含 already served → 同樣依規則 8 回報並停掉單元。"""
+    def test_open_registration_failed_already_served_stops_unit(self):
+        """伺服器自訂文字的註冊失敗，內容含 already served → 同樣回報「已由其他程序提供」並停掉單元。"""
         self.sysd.on_start = helpers.serve_simulator(
             self.h, status="exited", last_error={"kind": "registration_failed", "message": "註冊失敗"},
             last_error_detail="Error: This folder is already served by another process (409).")
@@ -262,7 +262,7 @@ class OpenTest(Base):
         self.assertIn("稍等一分鐘", out)
         self.assertEqual([c[-1] for c in self.sysd.cmds("stop")], [self.unit_of(self.plain)])
 
-    def test_open_registration_failed_other_is_not_rule8(self):
+    def test_open_registration_failed_other_is_not_already_served(self):
         self.sysd.on_start = helpers.serve_simulator(
             self.h, status="exited", last_error={"kind": "registration_failed", "message": "註冊失敗"},
             last_error_detail="Error: Registration: Access denied (403).")
@@ -358,11 +358,11 @@ class InfoTest(Base):
         self.assertEqual(rows[1]["error"]["kind"], "already_served")
         rc, out, err = run(self.ctx(), "ls")
         self.assertIn("✅ 上線  projects（入口），已上線 1時1分", out)
-        self.assertIn("❌ 失敗：已由其他程序提供", out)          # AC14：ls 顯示原因
+        self.assertIn("❌ 失敗：已由其他程序提供", out)          # ls 顯示原因
         self.assertIn("⚠️ 舊版警告", out)
 
-    def test_N3_ls_shows_reason_for_stopped_units(self):
-        """N3：停止或失敗的單元，ls（含 --json）顯示 last_error 與 last_error_detail 的可讀原因。"""
+    def test_ls_shows_reason_for_stopped_units(self):
+        """停止或失敗的單元，ls（含 --json）顯示 last_error 與 last_error_detail 的可讀原因。"""
         cases = {
             "busy": ({"status": "stopped", "error": None, "last_error": {"kind": "already_served"}},
                      "inactive", "⛔ 停止：這個資料夾已由其他程序提供（你可能手動開了 claude rc）"),
@@ -409,7 +409,7 @@ class InfoTest(Base):
         self.assertIn(repo, out)
         self.assertIn("hooked", out)
         self.assertIn("含 hooks", out)
-        self.assertIn("Remote Control 一次性同意（F9）：已回答", out)
+        self.assertIn("Remote Control 一次性同意：已回答", out)
 
 
 if __name__ == "__main__":

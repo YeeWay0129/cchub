@@ -1,6 +1,7 @@
-"""§5.7 install／uninstall。兩者都支援 --dry-run（只印出每一步，完全不動系統）。
+"""install／uninstall。兩者都支援 --dry-run（只印出每一步，完全不動系統）。
 
-- 偵測到自己在 cchub 單元裡（手機的 session）一律拒絕：必須在電腦的終端機執行（§5.1 規則 9）。
+- 偵測到自己在 cchub 單元裡（手機的 session）一律拒絕：必須在電腦的終端機執行
+  （安裝會改 ~/.claude/settings.json 與 systemd 單元，不能由手機那端觸發）。
 - ~/.claude/settings.json 的修改是「最小 diff」：只新增 permissions.ask 的 cchub 規則，其他鍵不動；
   改之前備份到 ~/.claude/backups/settings.json.backup.<YYYYMMDD>（同一天第二次起加 -2、-3…）。
 """
@@ -26,7 +27,8 @@ from .reconcile import entry_instance_config
 from .units import read_registry, write_instance_config, write_registry, Systemctl
 from .util import CchubError, atomic_write_bytes, atomic_write_json, atomic_write_text, ensure_dir, iso_now, read_json
 
-# §5.4：用具體子指令列舉，不用 Bash(cchub *) 萬用規則
+# 用具體子指令列舉，不用 Bash(cchub *) 萬用規則：否則 ls、open 這些不需要確認的指令也會每次跳確認。
+# 這組規則放在使用者層級，對所有 session 都生效，不只入口
 ASK_RULES = [
     "Bash(cchub new *)",
     "Bash(cchub stop *)",
@@ -368,7 +370,7 @@ def _record_installed_file(paths: Paths, path: str, content: bytes, backup: str 
 
 
 def _write_managed_file(paths: Paths, dest: str, text: str, backup_path: Callable[[], str]) -> str | None:
-    """寫 cchub 管理的檔案：已存在且內容不同 → 先備份（D8）；registry 記下寫入內容的 sha256。回傳備份路徑。"""
+    """寫 cchub 管理的檔案：已存在且內容不同 → 先備份（可能是使用者自己的檔案）；registry 記下寫入內容的 sha256。回傳備份路徑。"""
     backup = None
     if _file_state(dest, text) == "different":
         backup = backup_path()
@@ -381,7 +383,7 @@ def _write_managed_file(paths: Paths, dest: str, text: str, backup_path: Callabl
 
 
 def _removal_decision(files_rec: dict, path: str) -> str:
-    """uninstall：只刪 sha256 與安裝紀錄相符的檔案（D8）。"""
+    """uninstall：只刪 sha256 與安裝紀錄相符的檔案；安裝後被改過的保留，不刪掉使用者的修改。"""
     if not os.path.lexists(path):
         return "absent"
     rec = files_rec.get(path)
@@ -431,7 +433,7 @@ def build_install_plan(paths: Paths, cfg: Config, systemctl: Systemctl, procfs, 
     entry_inst = instance_for_dir(entry)
     entry_unit = unit_for_instance(entry_inst)
 
-    # 手動開的 rc（§5.4 上線前）
+    # 手動開的 rc：同一個資料夾只能由一個伺服器服務，入口資料夾上有手動開的就擋下；在底下的資料夾只警告
     manual = [p for p in procfs.rc_under(entry) if not p.cchub_unit]
     for p in manual:
         where = "入口資料夾" if p.cwd == entry else "入口底下的資料夾"
@@ -547,7 +549,7 @@ def build_install_plan(paths: Paths, cfg: Config, systemctl: Systemctl, procfs, 
         }
         write_registry(paths, reg)
 
-    plan.steps.append(Step(f"在 {_rel(paths, paths.claude_settings)} 加使用者層級 ask 規則（F23；體驗層，不是安全邊界）",
+    plan.steps.append(Step(f"在 {_rel(paths, paths.claude_settings)} 加使用者層級 ask 規則（體驗層，不是安全邊界）",
                            sdetails, do_settings))
 
     # 6. 設定、入口實例、enable
@@ -658,7 +660,7 @@ def build_uninstall_plan(paths: Paths, cfg: Config | None, systemctl: Systemctl,
     ch: SettingsChange | None = None
     sdetails = []
     if not recorded:
-        # D7：沒有紀錄就什麼都不刪，避免刪到使用者自己的規則
+        # 沒有紀錄就什麼都不刪，避免刪到使用者自己的規則
         sdetails.append("registry 沒有「cchub 加了哪些規則」的紀錄，這一步不動 settings.json。")
         sdetails.append("如需移除，請手動檢查 ~/.claude/settings.json 的 permissions.ask，只刪確定是 cchub 加的：")
         sdetails.extend(f"  {r}" for r in ASK_RULES)

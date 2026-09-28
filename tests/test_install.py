@@ -1,4 +1,4 @@
-"""§5.7 install／uninstall：dry-run 完全不動檔案；settings.json 最小 diff 與備份命名；uninstall 還原。
+"""install／uninstall：dry-run 完全不動檔案；settings.json 最小 diff 與備份命名；uninstall 還原。
 
 真安裝只在暫存家目錄＋假的 systemctl 上跑，不碰真實系統。
 """
@@ -52,7 +52,7 @@ class InstallBase(unittest.TestCase):
 
     def ctx(self, **kw):
         kw.setdefault("isatty", lambda: True)
-        kw.setdefault("ask", lambda prompt: "yes")          # 注入確認函式（D4：已沒有跳過確認的旗標）
+        kw.setdefault("ask", lambda prompt: "yes")          # 注入確認函式（沒有可以跳過確認的旗標）
         return helpers.make_ctx(self.h, self.sysd, **kw)
 
 
@@ -213,14 +213,14 @@ class RealInstallTest(InstallBase):
         self.assertEqual(helpers.snapshot(self.h.tmp), before)
 
 
-class D7D8Test(InstallBase):
-    """D7：uninstall 只移除 registry 記錄為 cchub 新增的規則；D8：既有的 skill／單元檔先備份、只刪 hash 相符的。"""
+class ExistingRulesAndFilesTest(InstallBase):
+    """uninstall 只移除 registry 記錄為 cchub 新增的規則；既有的 skill／單元檔先備份、只刪 hash 相符的。"""
 
     def read_settings(self):
         with open(self.settings, "rb") as f:
             return f.read()
 
-    def test_D7_preexisting_rules_are_not_removed(self):
+    def test_preexisting_rules_are_not_removed(self):
         pre = dict(SETTINGS, permissions={"ask": ASK_RULES + ["Bash(rm -rf *)"], "allow": ["Bash(ls *)"]})
         with open(self.settings, "w", encoding="utf-8") as f:
             f.write(settings_text(pre))
@@ -233,7 +233,7 @@ class D7D8Test(InstallBase):
         self.assertEqual(self.read_settings(), before)                   # uninstall 也不能刪使用者自己的規則
         self.assertIn("cchub 沒有新增任何規則", c.out.getvalue())
 
-    def test_D7_missing_registry_deletes_nothing(self):
+    def test_missing_registry_deletes_nothing(self):
         self.assertEqual(main(["install"], ctx=self.ctx()), 0)
         installed = self.read_settings()
         os.unlink(self.h.paths.registry_file)
@@ -244,7 +244,7 @@ class D7D8Test(InstallBase):
         self.assertTrue(os.path.exists(self.h.paths.skill_file))         # 沒有 sha256 紀錄 → 保留
         self.assertIn("沒有安裝紀錄", c.out.getvalue())
 
-    def test_D8_existing_skill_backed_up_and_hash_guarded(self):
+    def test_existing_skill_backed_up_and_hash_guarded(self):
         p = self.h.paths
         os.makedirs(p.skill_dir)
         with open(p.skill_file, "w") as f:
@@ -266,7 +266,7 @@ class D7D8Test(InstallBase):
         self.assertIn("sha256 不符", c.out.getvalue())
         self.assertIn(os.path.basename(bk), c.out.getvalue())             # 告訴使用者原檔備份在哪
 
-    def test_D8_unit_file_backup_and_delete_when_hash_matches(self):
+    def test_unit_file_backup_and_delete_when_hash_matches(self):
         p = self.h.paths
         unit = os.path.join(p.systemd_user_dir, "cchub-rc@.service")
         os.makedirs(p.systemd_user_dir)

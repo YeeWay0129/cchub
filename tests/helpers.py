@@ -196,7 +196,7 @@ class FakeClock:
 def make_ctx(h: TempHome, sysd: FakeSystemd | None = None, procfs: FakeProcFS | None = None, **kw) -> Context:
     sysd = sysd or FakeSystemd()
     fields = getattr(Context, "__dataclass_fields__", {})
-    for opt in ("environ", "stdin"):          # 修正前的版本沒有這兩個欄位（用來對照「修正前會失敗」）
+    for opt in ("environ", "stdin"):          # 較舊版本的 Context 沒有這兩個欄位：沒有就不傳，同一套測試也能對舊版程式執行
         if opt not in fields:
             kw.pop(opt, None)
     extra = {}
@@ -224,7 +224,7 @@ def make_ctx(h: TempHome, sysd: FakeSystemd | None = None, procfs: FakeProcFS | 
 
 def serve_simulator(h: TempHome, status: str = "ready", error: dict | None = None, recent=None,
                     last_error: dict | None = None, last_error_detail: str | None = None):
-    """假裝 _serve：單元一 start 就寫一份狀態檔（跟真的一樣不帶 session 網址，N5）。"""
+    """假裝 _serve：單元一 start 就寫一份狀態檔（跟真的一樣不帶 session 網址）。"""
     from cchub.names import instance_from_unit
     from cchub.units import write_instance_state
 
@@ -295,7 +295,7 @@ sys.exit(run_serve(Paths(sys.argv[1]), sys.argv[2]))
 
 
 def serve_wrapper(h: TempHome) -> str:
-    """在子程序裡跑 _serve，用參數注入暫存家目錄（D9：正式程式不讀任何路徑覆寫環境變數）。"""
+    """在子程序裡跑 _serve，用參數注入暫存家目錄（正式程式不讀任何路徑覆寫環境變數）。"""
     path = os.path.join(h.tmp, "run_serve.py")
     with open(path, "w", encoding="utf-8") as f:
         f.write(SERVE_WRAPPER.format(repo=REPO))

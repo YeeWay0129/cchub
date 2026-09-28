@@ -1,4 +1,4 @@
-"""§5.1 規則 1–4：名稱驗證、systemd-escape、名稱解析、路徑安全。"""
+"""名稱驗證、systemd-escape、名稱解析、路徑安全。"""
 
 import os
 import shutil
@@ -22,14 +22,14 @@ class NewNameTest(unittest.TestCase):
             with self.subTest(n=n), self.assertRaises(CchubError):
                 validate_new_name(n)
 
-    def test_D6_trailing_newline_and_whitespace(self):
-        """D6：re.match＋$ 會讓尾端 \\n 過關；一律 fullmatch。"""
+    def test_trailing_newline_and_whitespace_rejected(self):
+        """re.match＋$ 會讓尾端 \\n 過關；一律 fullmatch。"""
         for n in ("ledger\n", "ledger\r", "ledger\t", "ledger\r\n", "ledger\u3000", "ledger\u00a0",
                   "ledger ", " ledger", "\nledger", "led\nger", "ledger\u200b"):
             with self.subTest(n=repr(n)), self.assertRaises(CchubError):
                 validate_new_name(n)
 
-    def test_D6_modes_exact(self):
+    def test_modes_exact_match(self):
         from cchub.paths import validate_mode
         for m in ("auto\n", " auto", "auto ", "Auto", "bypassPermissions\n"):
             with self.subTest(m=repr(m)), self.assertRaises(CchubError):
@@ -121,13 +121,13 @@ class ResolveTest(unittest.TestCase):
             with self.subTest(t=t):
                 self.assertTrue(self.r(t).is_entry)
 
-    def test_D6_control_chars_and_edge_whitespace(self):
+    def test_control_chars_and_edge_whitespace_rejected(self):
         for t in ("foo\n", "foo\t", "foo\r", "\u3000foo", " foo", "foo ", "fo\u200bo", "foo\x00",
                   os.path.join(self.h.project, "foo") + "\n"):
             with self.subTest(t=repr(t)), self.assertRaises(CchubError):
                 self.r(t)
 
-    def test_D6_config_paths_reject_control_chars(self):
+    def test_config_paths_reject_control_chars(self):
         from cchub.paths import load_config
         self.h.update_config(projects_root=self.h.project + "\n")
         with self.assertRaises(CchubError) as cm:

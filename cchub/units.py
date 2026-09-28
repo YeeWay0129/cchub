@@ -39,7 +39,7 @@ def default_runner(argv: Sequence[str], timeout: float = 60) -> RunResult:
 
 
 def delayed_action_argv(action: str, unit: str, delay: int = 15) -> list[str]:
-    """§5.1 規則 9：在 cchub 單元裡對自己動手時，改用延後排程，讓目前這一輪能先回覆。"""
+    """在 cchub 單元裡對自己動手時，改用延後排程，讓目前這一輪能先回覆。"""
     return ["systemd-run", "--user", f"--on-active={delay}s", "systemctl", "--user", action, unit]
 
 
@@ -177,7 +177,7 @@ def running_project_units(systemctl: Systemctl, entry_unit: str) -> list[str]:
 
 
 def check_capacity(systemctl: Systemctl, cfg: Config, entry_unit: str, target_unit: str) -> None:
-    """§5.1 規則 7：專案伺服器最多 max_servers 個（不含入口），以 systemd 即時狀態計算。"""
+    """專案伺服器最多 max_servers 個（不含入口），以 systemd 即時狀態計算；限制資源用量與暴露面。"""
     running = [u for u in running_project_units(systemctl, entry_unit) if u != target_unit]
     if len(running) >= cfg.max_servers:
         from .names import systemd_unescape_path
@@ -192,7 +192,8 @@ def check_capacity(systemctl: Systemctl, cfg: Config, entry_unit: str, target_un
 @contextmanager
 def state_lock(paths: Paths, timeout: float = 120.0, poll: float = 0.1,
                clock: Callable[[], float] = time.monotonic, sleep: Callable[[float], None] = time.sleep):
-    """§5.1 規則 7：new、open、stop、restart 外面包一把 flock（<state>/lock），讓並行的呼叫排隊。"""
+    """new、open、stop、restart 外面包一把 flock（<state>/lock），讓並行的呼叫排隊：
+    上限計數、同名檢查、registry 的暫存紀錄才不會被同時進來的兩個呼叫互相踩掉。"""
     ensure_dir(paths.state_dir)
     fd = os.open(paths.lock_file, os.O_RDWR | os.O_CREAT, 0o600)
     try:

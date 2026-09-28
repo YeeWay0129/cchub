@@ -89,7 +89,7 @@ In the Claude app, go to **Code** → your computer. The sheet shows a **Directo
 - **See results:** Ask Claude to publish the result as an Artifact, then tap the link.
 - **Check or stop servers:** Ask *"what's running?"* (`cchub ls`) or *"stop ledger"* (asks you to confirm).
 
-The reply to `new` or `open` ends with the server's **environment URL** (`https://claude.ai/code?environment=…`) as a fallback. cchub never records session URLs or anything else that can contain conversation text.
+The reply to `new` or `open` ends with the server's **environment URL** (`https://claude.ai/code?environment=…`) as a fallback. cchub doesn't report session URLs: in Claude Code's output they only appear inside session-title lines, which can contain conversation text, so those lines are dropped.
 
 ## Commands
 

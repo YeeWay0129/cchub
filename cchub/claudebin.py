@@ -1,8 +1,12 @@
-"""§5.3 第 3 步：挑版本最高的 claude 執行檔；§5.1 規則 10：清掉會影響 CLI 的環境變數。
+"""挑版本最高的 claude 執行檔，並清掉會影響 CLI 的環境變數。
 
-候選（F14）：
+候選：
 - ~/.config/Claude/claude-code/<版本>/claude   （桌面 App 帶的；App 更新會刪掉舊版目錄）
 - ~/.local/share/claude/versions/<版本>        （原生更新器裝的；檔案本身就是執行檔）
+
+挑最新版：伺服器是用自己的執行檔路徑開子 session，舊版目錄一被更新刪掉，就開不出新 session。
+環境變數：CLAUDE*、ANTHROPIC* 等會被伺服器的 claude 繼承而改變它的行為（例如 ANTHROPIC_API_KEY
+會讓它改用 API 金鑰，而 Remote Control 只接受 claude.ai 帳號登入），所以啟動前一律清掉。
 """
 
 from __future__ import annotations
@@ -12,8 +16,8 @@ import re
 from dataclasses import dataclass
 from typing import Mapping
 
-VERSION_RE = re.compile(r"(\d{1,6})\.(\d{1,6})\.(\d{1,6})")   # 一律用 fullmatch（D6）
-MIN_ARTIFACT_VERSION = (2, 1, 281)   # F14：2.1.281 起伺服器 session 才有 Artifact tool
+VERSION_RE = re.compile(r"(\d{1,6})\.(\d{1,6})\.(\d{1,6})")   # 一律用 fullmatch：match 加 $ 會放過結尾的 \n
+MIN_ARTIFACT_VERSION = (2, 1, 281)   # 2.1.281 起伺服器 session 才有 Artifact tool
 
 ENV_DROP_PREFIXES = ("CLAUDE", "ANTHROPIC")
 ENV_DROP_EXACT = frozenset({"USE_LOCAL_OAUTH", "USE_STAGING_OAUTH"})
@@ -70,7 +74,7 @@ def select_claude(native_root: str, desktop_root: str) -> tuple[ClaudeBinary | N
     if best.version < MIN_ARTIFACT_VERSION:
         warnings.append(
             f"claude {best.version_str} 低於 {format_version(MIN_ARTIFACT_VERSION)}："
-            "伺服器 session 沒有 Artifact tool（F14）"
+            "伺服器 session 沒有 Artifact tool"
         )
     return best, warnings
 

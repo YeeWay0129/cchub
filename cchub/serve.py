@@ -1,19 +1,27 @@
-"""§5.3 `cchub _serve <實例>`：一個薄的 supervisor。
+"""`cchub _serve <實例>`：一個薄的 supervisor。
 
-1. 讀實例設定並重新驗證（D10）：實例名＝escape(資料夾)、資料夾在 allowed_roots 內、
-   F6 信任成立、§5.1 規則 5 的 open 政策通過；任一不成立 → exit 3 並寫明原因。
+1. 讀實例設定並重新驗證：實例名＝escape(資料夾)、資料夾在 allowed_roots 內、
+   依 CLI 的規則受信任、open 的信任政策（見 trust.py）通過；任一不成立 → exit 3 並寫明原因。
+   實例設定檔可能在 cchub 之外被改過，所以每次啟動都重驗，不只信當初 open／new 時的檢查。
 2. 上次啟動很快就失敗（例如 401）→ 先在這裡退避再試（10 秒起、最長 5 分鐘、連上就歸零）。
 3. Remote Control 的一次性同意沒答（~/.claude.json 的 remoteDialogSeen 不是 true）→ 不啟動，
    記下原因後以一般錯誤結束，交給 systemd 重啟（非永久性）。
-4. 等網路（連 api.anthropic.com:443），失敗就在內部指數退避。不用 systemd 的 RestartSteps（F17）。
-5. 選版本最高的 claude 執行檔（F14），啟動 `claude remote-control …`（**不加 --verbose**，F24），轉發 SIGTERM。
+4. 等網路（連 api.anthropic.com:443），失敗就在內部指數退避。
+   不用 systemd 的 RestartSteps：它的計數在單元整個生命期內累計、不會歸零。
+5. 選版本最高的 claude 執行檔（見 claudebin.py），啟動 `claude remote-control …`，轉發 SIGTERM。
+   **不加 --verbose**：它會把每個 session 的完整對話與工具輸出寫進 journal。
 6. stdout 與 stderr 分開讀：
-   - stdout 只接受固定文法的行（D2）：啟動 banner 的環境網址行、連線狀態行（名稱必須是這個資料夾）、
-     第一次出現狀態行之前的 session 網址。其他行（session 標題、工具活動…）一律丟棄，也不寫進狀態檔。
-   - stderr 只認「完全吻合」的已知 CLI 訊息（D1），其他行只計數、不記內容。
+   - stdout 只接受固定文法的行：啟動 banner 的環境網址行、連線狀態行（名稱必須是這個資料夾）、
+     第一次出現狀態行之前的 session 網址。其他行（session 標題、工具活動…）一律丟棄，也不寫進狀態檔：
+     那些行由對話產生，可能含對話內容或任意偽造的字樣；寫進 journal 會外洩，經 `cchub logs` 回流到入口還會變成注入管道。
+   - stderr 只認「完全吻合」的已知 CLI 訊息，其他行只計數、不記內容。
+     CLI 的致命錯誤都寫在 stderr；stdout 上的字樣可以被對話偽造，所以錯誤分類只看 stderr。
+     唯一的例外是第一次狀態行之前（還沒有任何對話）的一次性同意提示，而且只當非永久性錯誤處理。
 7. 永久性錯誤（exit 3）只看 stderr 裡完全吻合的「未受信任」「未登入」，而且該行必須出現在子程序結束前 30 秒內。
-   409 在任何時間點都不算永久性（v0.3.1）；401 也不算。都走一般重啟＋內部退避。寧可多重試，也不要誤判成永久停機。
-8. 註冊失敗（N2）：stderr 的 `Error: …` 行後面 5 行內接著 `Exiting in about N seconds.` → 記為非永久性的
+   409 在任何時間點都不算永久性：crash 後立刻重啟時，伺服器端可能還留著自己上一個程序的註冊，回的是暫時性 409；
+   真的被別的程序佔住時，由 `cchub open` 從狀態檔讀到 409 後回報並停掉單元。401 也不算永久性。
+   兩者都走一般重啟＋內部退避。寧可多重試，也不要誤判成永久停機。
+8. 註冊失敗：stderr 的 `Error: …` 行後面 5 行內接著 `Exiting in about N seconds.` → 記為非永久性的
    registration_failed，並把那一行 Error（去控制字元、截 200 字）存進狀態檔的 last_error_detail；只存這一行。
    完全吻合的預設 409 原文仍記為 already_served。
 
@@ -69,7 +77,7 @@ def strip_ansi(s: str) -> str:
     return CTRL_RE.sub("", s)
 
 
-# ---------------------------------------------------------------- stdout 固定文法（D2）
+# ---------------------------------------------------------------- stdout 固定文法（白名單，理由見模組說明第 6 點）
 # CLI 的狀態顯示：狀態列是「<圖示> <狀態字> · <名稱> · <分支>」（從第 0 欄開始）；
 # 名稱＝GitHub 遠端的 repo 名，沒有就是 basename(cwd)；非 git 資料夾沒有分支段。
 # session 清單、capacity、工具活動都是縮排行 → 一律丟棄。
@@ -152,7 +160,7 @@ class StdoutFilter:
         return out
 
 
-# ---------------------------------------------------------------- stderr 已知訊息（D1）
+# ---------------------------------------------------------------- stderr 已知訊息（完全吻合才算）
 
 MSG_UNTRUSTED = ("Error: Workspace not trusted. Please run `claude` in {dir} first to review and accept "
                  "the workspace trust dialog.")
@@ -174,7 +182,7 @@ REASONS = {
     "auth_401": "Remote Control 驗證失敗（401）：CLI 登入可能過期；會自動重試，一直失敗就回電腦執行 claude auth login",
     "consent": "Remote Control 的一次性同意還沒回答：回電腦執行一次 claude remote-control 並回答 y；之後會自動重試",
 }
-# 409（already_served）在任何時間點都不是永久性錯誤（v0.3.1，N1）
+# 409（already_served）在任何時間點都不是永久性錯誤（可能是自己上一個程序殘留的註冊，見模組說明第 7 點）
 PERMANENT_STDERR_KINDS = ("untrusted", "auth")
 PERMANENT_KINDS = PERMANENT_STDERR_KINDS + ("config", "policy", "no_binary")
 
@@ -239,7 +247,7 @@ class StderrMonitor:
         return out
 
     def _registration_failure(self) -> list[str]:
-        """`Exiting in about N seconds.` 之前 5 行內最近的 `Error: …` 行 → 註冊失敗（N2）。"""
+        """`Exiting in about N seconds.` 之前 5 行內最近的 `Error: …` 行 → 註冊失敗。"""
         for entry in reversed(self._recent):
             line, t, kind, counted = entry
             if not line.startswith("Error: "):
@@ -328,7 +336,7 @@ def wait_for_network(probe: Callable[[], bool], sleep: Callable[[float], None], 
     return fails
 
 
-# ---------------------------------------------------------------- 實例驗證（D10）
+# ---------------------------------------------------------------- 實例驗證（每次啟動都重驗）
 
 class _Terminated(Exception):
     pass
@@ -396,7 +404,7 @@ def expected_status_names(directory: str) -> set[str]:
 
 
 def load_instance(paths: Paths, cfg: Config, instance: str, claude_cfg: dict) -> dict:
-    """讀並重新驗證實例設定（D10）。不通過丟 ServeConfigError（→ exit 3）。"""
+    """讀並重新驗證實例設定（設定檔可能在 cchub 之外被改過）。不通過丟 ServeConfigError（→ exit 3）。"""
     icfg = read_instance_config(paths, instance)
     if not icfg:
         raise ServeConfigError(f"找不到實例設定：{paths.instance_cfg_file(instance)}")
@@ -413,7 +421,7 @@ def load_instance(paths: Paths, cfg: Config, instance: str, claude_cfg: dict) ->
         check_path_safety(real, cfg, paths.home)
     info = trust_info(real, claude_cfg, paths.home)
     if not info.trusted:
-        raise ServeConfigError(f"資料夾未受信任（F6）：{real}；回電腦在該資料夾執行一次 claude 接受信任", "untrusted")
+        raise ServeConfigError(f"資料夾未受信任：{real}；回電腦在該資料夾執行一次 claude 接受信任", "untrusted")
     if info.inherited and risky_configs(real):
         try:
             check_open_policy(real, claude_cfg, paths.home)
@@ -433,7 +441,8 @@ def load_instance(paths: Paths, cfg: Config, instance: str, claude_cfg: dict) ->
 
 
 def build_argv(exe: str, inst: dict) -> list[str]:
-    # 不加 --verbose（F24）；--continue 不能和 --spawn 併用，普通重啟本來就會接回（§13 誤診 5）
+    # 不加 --verbose：它會把每個 session 的完整對話與工具輸出寫進 journal。
+    # 不加 --continue：它不能和 --spawn 併用，而且普通重啟本來就會接回原 session。
     return [exe, "remote-control", "--name", inst["title"], "--spawn", "same-dir",
             "--capacity", str(inst["capacity"]), "--permission-mode", inst["mode"]]
 

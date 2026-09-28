@@ -1,4 +1,4 @@
-"""§5.3 第 3 步：選執行檔；§5.1 規則 10：清環境變數。"""
+"""選 claude 執行檔（版本最高者）、清掉會影響 CLI 的環境變數。"""
 
 import os
 import unittest
@@ -75,9 +75,9 @@ class SelectTest(unittest.TestCase):
     def test_parse_version(self):
         self.assertEqual(parse_version("2.1.283"), (2, 1, 283))
         for bad in ("2.1", "v2.1.3", "2.1.3-beta", "", "a.b.c", "2.1.283\n", " 2.1.283", "2.1.283 "):
-            self.assertIsNone(parse_version(bad))           # D6：fullmatch
+            self.assertIsNone(parse_version(bad))           # 一律 fullmatch：結尾的 \n 也不能過
 
-    def test_D6_version_dir_with_newline_skipped(self):
+    def test_version_dir_with_newline_skipped(self):
         make_exec(os.path.join(self.native, "9.9.9\n"))
         make_exec(os.path.join(self.native, "2.1.290"))
         self.assertEqual(self.sel()[0].version, (2, 1, 290))

@@ -1,7 +1,8 @@
-"""獨立驗收（verify-report.md）的重現腳本改寫成 unittest：D1–D12 各一組對抗性測試。
+"""對抗性測試：模擬偽造的錯誤字樣、中途被換掉的路徑、惡意的需求原文、既有的使用者檔案等情境，
+確認每一道防護真的擋得住。
 
 這些測試只用穩定的入口（main()、Supervisor、SKILL.md、install 流程），
-所以也能拿去跑修正前的版本，確認「修正前會失敗、修正後通過」。
+不依賴內部函式，程式內部重構後仍然適用。
 """
 
 import io
@@ -68,10 +69,10 @@ class ServeBase(unittest.TestCase):
         return rc, out.getvalue(), read_instance_state(self.h.paths, inst or self.inst)
 
 
-class D1PermanentClassificationTest(ServeBase):
-    """D1【高】：對話內容、過期錯誤、一般錯誤訊息都不能讓伺服器以 exit 3 永久停下。"""
+class PermanentExitClassificationTest(ServeBase):
+    """對話內容、過期錯誤、一般錯誤訊息都不能讓伺服器以 exit 3 永久停下（永久停下就得回電腦處理）。"""
 
-    def test_E_title_error_then_disconnect(self):
+    def test_error_text_in_title_then_disconnect(self):
         helpers.install_fake_claude(self.h, output=block_multi("Error: Workspace not trusted fix",
                                                                "Reading SECRET-PLAN-7731.md") * 3,
                                     stderr="Error: Remote Control disconnected: network unreachable\n", exit=1)
@@ -79,27 +80,27 @@ class D1PermanentClassificationTest(ServeBase):
         self.assertNotEqual(rc, PERMANENT_EXIT)
         self.assertNotEqual(st.get("status"), "failed")
 
-    def test_B_title_login_words(self):
+    def test_login_words_in_title(self):
         helpers.install_fake_claude(self.h, output=block_multi("Error: You must be logged in", "Running npm test") * 2,
                                     exit=1)
         self.assertNotEqual(self.run_sup()[0], PERMANENT_EXIT)
 
-    def test_F_old_401_then_unrelated_exit(self):
+    def test_old_401_then_unrelated_exit(self):
         helpers.install_fake_claude(
             self.h, output=block_multi("t", "s") * 50,
             stderr="[09:00:01] Error: Registration: Authentication failed (401). Retrying…\n"
                    "[13:40:00] Error: Remote Control disconnected (network)\n", exit=1)
         self.assertNotEqual(self.run_sup()[0], PERMANENT_EXIT)
 
-    def test_F_window_with_exact_not_logged_in(self):
-        """F（加強）：完全吻合的「未登入」在結束前 30 秒內 → 3；不在窗內 → 不是 3（窗縮成 0.3 秒、晚 1 秒結束）。"""
+    def test_exact_not_logged_in_counts_only_inside_window(self):
+        """完全吻合的「未登入」在結束前 30 秒內 → 3；不在窗內 → 不是 3（窗縮成 0.3 秒、晚 1 秒結束）。"""
         msg = "Error: You must be logged in to use Remote Control.\n"
         helpers.install_fake_claude(self.h, stderr=msg, exit=1)
         self.assertEqual(self.run_sup()[0], PERMANENT_EXIT)
         helpers.install_fake_claude(self.h, stderr=msg, hang=1.0, exit=1)
         self.assertNotEqual(self.run_sup(perm_window=0.3)[0], PERMANENT_EXIT)
 
-    def test_G_H_generic_already_messages(self):
+    def test_generic_already_messages(self):
         for msg in ("[10:00:00] Error: Session spawn failed: EEXIST: file already exists, open '/p/server.log'",
                     "Error: port already in use by dev server"):
             with self.subTest(msg=msg[:40]):
@@ -107,10 +108,10 @@ class D1PermanentClassificationTest(ServeBase):
                 self.assertNotEqual(self.run_sup()[0], PERMANENT_EXIT)
 
 
-class D2WhitelistLeakTest(ServeBase):
-    """D2【中】：session 標題、活動摘要不能進 journal／狀態檔；不能注入假的 session 網址。"""
+class OutputWhitelistLeakTest(ServeBase):
+    """session 標題、活動摘要（由對話產生）不能進 journal／狀態檔；不能注入假的 session 網址。"""
 
-    def test_A_to_D_fixtures(self):
+    def test_titles_and_fake_session_urls_do_not_leak(self):
         text = (block_multi("Error: Workspace not trusted fix", "Reading SECRET-PLAN-7731.md")
                 + block_single("Connected · https://claude.ai/code/session_EVIL123")
                 + block_multi("see https://claude.ai/code/session_EVIL999", "x",
@@ -124,8 +125,8 @@ class D2WhitelistLeakTest(ServeBase):
         self.assertFalse(any("EVIL" in u for u in st.get("session_urls") or []))
 
 
-class D3TrustToctouTest(unittest.TestCase):
-    """D3【中】：new 建好資料夾之後、寫信任之前，把路徑換成指向既有資料夾的 symlink（或改名）→ 必須拒絕。
+class TrustPathSwapTest(unittest.TestCase):
+    """new 建好資料夾之後、寫信任之前，把路徑換成指向既有資料夾的 symlink（或改名）→ 必須拒絕。
 
     換的時機用 git 那一步（ctx.git 的包裝）：真的 git init 完成後立刻換，確保情境真的發生。
     """
@@ -172,8 +173,8 @@ class D3TrustToctouTest(unittest.TestCase):
         self.assertEqual(read_registry(h.paths)["trust_keys"], [])
 
 
-class D4InstallConfirmationTest(unittest.TestCase):
-    """D4【中】：沒有旗標能跳過「輸入 yes」；在 Claude Code session 裡（CLAUDECODE）拒絕。"""
+class InstallConfirmationTest(unittest.TestCase):
+    """沒有旗標能跳過「輸入 yes」；在 Claude Code session 裡（CLAUDECODE）拒絕。"""
 
     def setUp(self):
         self.h = helpers.TempHome()
@@ -203,7 +204,7 @@ class D4InstallConfirmationTest(unittest.TestCase):
     def test_claudecode_env_refused(self):
         before = self.settings_bytes()
         ctx = helpers.make_ctx(self.h, isatty=lambda: True, ask=lambda p: "yes", environ={"CLAUDECODE": "1"})
-        self.assertIn("environ", type(ctx).__dataclass_fields__, "修正前的 Context 沒有 environ：無法拒絕")
+        self.assertIn("environ", type(ctx).__dataclass_fields__, "Context 沒有 environ 欄位：無法偵測 CLAUDECODE")
         for cmd in ("install", "uninstall"):
             with self.subTest(cmd=cmd):
                 c = helpers.make_ctx(self.h, isatty=lambda: True, ask=lambda p: "yes", environ={"CLAUDECODE": "1"})
@@ -213,8 +214,8 @@ class D4InstallConfirmationTest(unittest.TestCase):
         self.assertFalse(os.path.exists(self.h.paths.install_dir))
 
 
-class D5SkillQuotingTest(unittest.TestCase):
-    """D5【中】＋N4：使用者原話不能經過 shell 展開；原文剛好有一行分隔字也不能提早結束。
+class SkillBriefQuotingTest(unittest.TestCase):
+    """使用者原話不能經過 shell 展開；原文剛好有一行分隔字也不能提早結束。
 
     照 SKILL.md 的範本組指令（像模型會做的那樣）：分隔字換成新的隨機 8 位十六進位、確認原文沒有一行等於它、
     標題先拿掉引號／反斜線／換行，再用真的 bash 執行（cchub 換成只記錄 argv／stdin 的假程式）。
@@ -269,8 +270,8 @@ class D5SkillQuotingTest(unittest.TestCase):
         self.assertIn("--brief-stdin", r["argv"])
         self.assertEqual(leftovers, [])
 
-    def test_N4_hostile_briefs_run_nothing(self):
-        """N4：原文含整行 CCHUB_BRIEF、$(touch …)、反引號 → 什麼都不執行、原文完整傳入。"""
+    def test_hostile_briefs_run_nothing(self):
+        """原文含整行 CCHUB_BRIEF、$(touch …)、反引號 → 什麼都不執行、原文完整傳入。"""
         briefs = {
             "delim-line": "第一行需求\nCCHUB_BRIEF\ntouch INJECTED-A\n第三行",
             "cmd-subst": "價格 $(touch INJECTED-B) 與 ${HOME}",
@@ -285,7 +286,7 @@ class D5SkillQuotingTest(unittest.TestCase):
                 self.assertEqual(r["argv"][2:4], ["--title", "Its 記帳  工具二"])
 
     def test_double_quotes_would_expand(self):
-        # 對照：把原話放進雙引號（舊範本的寫法）會把 $AAPL 吃掉
+        # 對照：把原話放進雙引號會把 $AAPL 吃掉，這就是 SKILL.md 要求用加單引號 heredoc 的原因
         r, _ = self.run_bash(f'cchub new x --title "{self.SAMPLE.replace(chr(96), "").replace(chr(34), "")}"')
         self.assertNotIn("$AAPL", r["argv"][-1])
 
@@ -305,8 +306,8 @@ class D5SkillQuotingTest(unittest.TestCase):
             h.cleanup()
 
 
-class D6NameNewlineTest(unittest.TestCase):
-    """D6【低】：new 名稱尾端換行（exp_new_output：new 'nl\\n' rc=0 並建出 'nl\\n'）。"""
+class NewNameNewlineTest(unittest.TestCase):
+    """new 的名稱尾端帶換行（'nl\\n'）要被拒絕，不能建出名稱含換行的資料夾（regex 的 $ 會放過結尾的 \\n）。"""
 
     def test_new_trailing_newline_rejected(self):
         h = helpers.TempHome()
@@ -344,10 +345,10 @@ class InstallBase(unittest.TestCase):
             return f.read()
 
 
-class D7UninstallRulesTest(InstallBase):
-    """D7【低】：uninstall 不能刪到使用者自己原有的規則；registry 不見就什麼都不刪。"""
+class UninstallKeepsUserRulesTest(InstallBase):
+    """uninstall 不能刪到使用者自己原有的規則；registry 不見就什麼都不刪。"""
 
-    def test_I2_preexisting_rules_survive_uninstall(self):
+    def test_preexisting_rules_survive_uninstall(self):
         pre = dict(self.SETTINGS, permissions={"ask": ASK_RULES + ["Bash(rm -rf *)"], "allow": ["Bash(ls *)"]})
         with open(self.settings, "w") as f:
             f.write(json.dumps(pre, indent=2, ensure_ascii=False) + "\n")
@@ -356,7 +357,7 @@ class D7UninstallRulesTest(InstallBase):
         self.assertEqual(main(["uninstall"], ctx=self.ctx()), 0)
         self.assertEqual(self.read(self.settings), before)
 
-    def test_I5_registry_missing(self):
+    def test_registry_missing_keeps_settings(self):
         self.assertEqual(main(["install"], ctx=self.ctx()), 0)
         installed = self.read(self.settings)
         os.unlink(self.h.paths.registry_file)
@@ -364,10 +365,10 @@ class D7UninstallRulesTest(InstallBase):
         self.assertEqual(self.read(self.settings), installed)
 
 
-class D8ExistingFilesTest(InstallBase):
-    """D8【低】：既有的 skill 被覆蓋前要備份並警告。"""
+class ExistingSkillBackupTest(InstallBase):
+    """既有的 skill（可能是使用者自己的）被覆蓋前要備份並警告。"""
 
-    def test_I4_existing_skill(self):
+    def test_existing_skill_backed_up_and_kept_after_uninstall(self):
         p = self.h.paths
         os.makedirs(p.skill_dir)
         with open(p.skill_file, "w") as f:
@@ -388,8 +389,8 @@ class D8ExistingFilesTest(InstallBase):
         self.assertIn(backups[0], c.out.getvalue())
 
 
-class D9NoEnvOverrideTest(unittest.TestCase):
-    """D9【低】：正式程式不讀 CCHUB_HOME 之類的路徑覆寫環境變數。"""
+class NoPathEnvOverrideTest(unittest.TestCase):
+    """正式程式不讀 CCHUB_HOME 之類的路徑覆寫環境變數（否則會出現「路徑是假的、systemctl 是真的」）。"""
 
     def test_paths_ignore_cchub_home(self):
         fake = "/tmp/cchub-should-not-be-used"
@@ -417,10 +418,10 @@ class D9NoEnvOverrideTest(unittest.TestCase):
                 self.assertNotIn("environ.get(\"HOME\")", code, name)
 
 
-class D10ServeRevalidationTest(ServeBase):
-    """D10【低】：exp_paths P4——實例名與資料夾不對應、資料夾是繼承信任且有 hooks → 不能啟動 claude。"""
+class ServeRevalidationTest(ServeBase):
+    """_serve 啟動前重驗實例設定：實例名與資料夾不對應、資料夾是繼承信任且有 hooks → 不能啟動 claude。"""
 
-    def test_P4(self):
+    def test_mismatched_or_risky_instance_does_not_start_claude(self):
         risky = self.h.mkdir("work", "projects", "risky")
         self.h.write("work/projects/risky/.claude/settings.json", '{"hooks": {"Stop": [1]}}')
         rec = os.path.join(self.h.tmp, "rec.json")
@@ -433,10 +434,10 @@ class D10ServeRevalidationTest(ServeBase):
                 self.assertFalse(os.path.exists(rec), "claude 不應該被啟動")
 
 
-class D11ClaudeJsonEdgeTest(unittest.TestCase):
-    """D11【低】：孤立 surrogate → 可讀的錯誤、不 traceback、不寫不備份。"""
+class ClaudeJsonEdgeCaseTest(unittest.TestCase):
+    """~/.claude.json 含孤立 surrogate → 可讀的錯誤、不 traceback、不寫不備份。"""
 
-    def test_T4_lone_surrogate(self):
+    def test_lone_surrogate_in_claude_json_fails_cleanly(self):
         h = helpers.TempHome()
         try:
             with open(h.paths.claude_json, "w") as f:
@@ -456,8 +457,8 @@ class D11ClaudeJsonEdgeTest(unittest.TestCase):
             h.cleanup()
 
 
-class D12SkillRestartWordingTest(unittest.TestCase):
-    """D12【低】：延後 15 秒只在手機（cchub 單元內）成立；在電腦上會立刻重啟。"""
+class SkillRestartWordingTest(unittest.TestCase):
+    """SKILL.md 的說法要正確：延後 15 秒只在手機（cchub 單元內）成立；在電腦上會立刻重啟。"""
 
     def test_wording(self):
         with open(SKILL, encoding="utf-8") as f:

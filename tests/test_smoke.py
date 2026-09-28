@@ -1,7 +1,7 @@
-"""N7：正式進入點 bin/cchub 的 smoke test。
+"""正式進入點 bin/cchub 的 smoke test。
 
 在 `env -i PATH=/usr/bin:/bin` 下執行 `--help`、`doctor`、`ls`、`install --dry-run`，確認結束碼 0 而且不寫任何檔。
-這些都是唯讀指令，對象是真實的家目錄（Paths.default()，D9 之後不再能用環境變數換掉）：
+這些都是唯讀指令，對象是真實的家目錄（Paths.default() 只認使用者資料庫，不能用環境變數換掉）：
 - 有 strace 時，整個程序樹在 strace 下執行，斷言沒有任何「成功的寫入類系統呼叫」（-z 只列成功的呼叫）；
 - 另外比對 cchub 相關目錄與本 repo 的快照（repo 裡的 __pycache__ 由測試程式自己產生，不算）。
 """
