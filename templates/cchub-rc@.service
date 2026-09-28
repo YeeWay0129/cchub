@@ -1,0 +1,19 @@
+# cchub：替一個資料夾常駐官方 `claude remote-control` 伺服器（SPEC §5.3）
+# 實例名＝systemd-escape --path <資料夾>；由 cchub install 產生，佔位符在安裝時代入。
+[Unit]
+Description=cchub Remote Control server (%I)
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+ExecStart=@@CCHUB_BIN@@ _serve %i
+Environment=PATH=@@UNIT_PATH@@
+Environment=DISABLE_AUTOUPDATER=1
+Restart=always
+RestartSec=15
+# 3＝永久性錯誤（未受信任、未登入、實例驗證失敗），不重啟；交給 reconcile 與人處理。409、401、同意沒答都不算（v0.3.1）
+RestartPreventExitStatus=3
+TimeoutStopSec=20
+
+[Install]
+WantedBy=default.target

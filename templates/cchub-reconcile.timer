@@ -1,0 +1,12 @@
+# 每 5 分鐘跑一次 cchub _reconcile（SPEC §5.3）
+[Unit]
+Description=cchub reconcile timer (every 5 min)
+
+[Timer]
+# user manager 啟動後 1 分鐘第一次；已過時間的 OnStartupSec 會在 timer 啟動時立刻觸發
+OnStartupSec=1min
+OnUnitActiveSec=5min
+AccuracySec=30s
+
+[Install]
+WantedBy=timers.target

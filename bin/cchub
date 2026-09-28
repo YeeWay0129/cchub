@@ -1,0 +1,14 @@
+#!/usr/bin/env python3
+"""cchub 進入點：把 repo（或安裝目錄 ~/.local/share/cchub）加進 sys.path 後呼叫 cchub.cli:main。"""
+import os
+import sys
+
+sys.dont_write_bytecode = True   # 不在程式目錄留下 __pycache__（dry-run／doctor／ls 都要零寫入）
+_root = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+if _root not in sys.path:
+    sys.path.insert(0, _root)
+
+from cchub.cli import main  # noqa: E402
+
+if __name__ == "__main__":
+    sys.exit(main())
